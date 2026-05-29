@@ -9,10 +9,18 @@ All notable changes to this project will be documented in this file.
 - Telegram integration with chat_id `8798582756`
 - Hermes skill documentation (`SKILL.md`, `README.md`)
 - Token configuration guide (`.gitignore`, `.gitattributes`)
+- **Project history archive:** `docs/PROJECT-HISTORY.md` (complete project timeline & lessons)
+- **Git operations guide:** `docs/GIT-OPS.md` (version control workflow, commit conventions)
+- **Troubleshooting guide:** `docs/TROUBLESHOOTING.md` (common issues & solutions)
 
 ### Changed
 - Git tags: v0.1.0 → v0.3.0 (project organization)
 - File permissions standardized to 644
+- Added comprehensive documentation archive in `docs/` directory
+
+### Fixed
+- Repository migration from `jomoeess` to `jomoeess-cell` username
+- Token configuration best practices documented
 
 ## [v0.3.0] - 2026-05-29
 ### Added
