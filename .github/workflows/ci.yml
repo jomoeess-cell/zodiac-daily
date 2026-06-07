@@ -1,0 +1,121 @@
+name: "CI/CD Enterprise"
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  COVERAGE_THRESHOLD: 80
+
+jobs:
+  code-quality:
+    name: "Quality & Security"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+      
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install black ruff bandit safety pytest pytest-cov
+          [ -f requirements.txt ] && pip install -r requirements.txt || true
+      
+      - name: Black Format
+        run: black --check --line-length=100 . || echo "Format issues"
+      
+      - name: Ruff Lint
+        run: ruff check . || echo "Lint issues"
+      
+      - name: Gitleaks Secrets
+        run: |
+          wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz
+          tar -xzf gitleaks_8.18.2_linux_x64.tar.gz
+          ./gitleaks detect --source . --config ../gitleaks-config.toml -r gitleaks-report.json || true
+      
+      - name: Bandit Security
+        run: bandit -r . -lll -f json -o bandit-report.json || true
+      
+      - name: Upload Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-reports
+          path: gitleaks-report.json,bandit-report.json
+
+  test-coverage:
+    name: "Tests & Coverage"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install & Test
+        run: |
+          pip install pytest pytest-cov
+          [ -f requirements.txt ] && pip install -r requirements.txt || true
+          pytest --cov=. --cov-report=xml --cov-fail-under=$COVERAGE_THRESHOLD
+      
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+
+  telegram-notify:
+    name: "Telegram Alert"
+    runs-on: ubuntu-latest
+    needs: [code-quality, test-coverage]
+    if: failure()
+    
+    steps:
+      - name: Send Alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            MSG="[CI/CD Failed] $GITHUB_REPOSITORY by @$GITHUB_ACTOR - https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+              -d "chat_id=$TELEGRAM_CHAT_ID&text=$MSG" || echo "Failed to send"
+            echo "Alert sent"
+          else
+            echo "Telegram not configured - add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to Secrets"
+          fi
+
+  status-check:
+    name: "Overall Status"
+    runs-on: ubuntu-latest
+    needs: [code-quality, test-coverage]
+    if: always()
+    
+    steps:
+      - name: Check
+        run: |
+          [ "${{ needs.code-quality.result }}" == "success" ] && \
+          [ "${{ needs.test-coverage.result }}" == "success" ] && \
